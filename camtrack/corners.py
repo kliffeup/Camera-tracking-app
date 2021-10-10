@@ -54,26 +54,26 @@ def generate_index(init_value):
         index += 1
 
 
-def from_float32_to_uint8(img):
-    img *= 256
-    return img.astype(np.uint8)
-
-
 def _build_impl(frame_sequence: pims.FramesSequence,
                 builder: _CornerStorageBuilder) -> None:
-    shi_tomasi_params = dict(qualityLevel=0.01,
-                             minDistance=15,
-                             blockSize=7)
+    shi_tomasi_params = dict(qualityLevel=0.005,
+                             minDistance=7,
+                             blockSize=14)
 
     criteria = cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT
-    lukas_kanade_params = dict(winSize=(3, 3),
-                               maxLevel=0,
-                               criteria=(criteria, 4, 0.01),
+    lukas_kanade_params = dict(winSize =(10, 10),
+                               maxLevel=2,
+                               criteria=(criteria, 10, 0.03),
                                flags=cv2.OPTFLOW_LK_GET_MIN_EIGENVALS,
-                               minEigThreshold=0.05)
+                               minEigThreshold=0.0005)
 
-    max_corner_count = 1000
-    radius = 15
+    max_corner_count = 2000
+    radius = 7
+    if frame_sequence[0].shape[0] < 1000:
+        shi_tomasi_params["blockSize"] = 5
+        lukas_kanade_params = dict(winSize=(5, 5),
+                                   maxLevel=2,
+                                   criteria=(criteria, 10, 0.03))
 
     corners_coords = cv2.goodFeaturesToTrack(image=frame_sequence[0],
                                              maxCorners=max_corner_count,
@@ -91,10 +91,10 @@ def _build_impl(frame_sequence: pims.FramesSequence,
         corners_coords,
         np.array([shi_tomasi_params["blockSize"]] * len(corners_coords))))
 
-    for i, cur_frame in enumerate(frame_sequence[1:]):
+    for i, cur_frame in enumerate(frame_sequence[1:], 1):
         tracked_corners_coords, status, error = cv2.calcOpticalFlowPyrLK(
-            from_float32_to_uint8(prev_frame),
-            from_float32_to_uint8(cur_frame),
+            np.uint8(prev_frame * 255),
+            np.uint8(cur_frame * 255),
             corners_coords, None, **lukas_kanade_params)
 
         tracked_corners_coords = tracked_corners_coords.reshape(-1, 2)
@@ -114,22 +114,22 @@ def _build_impl(frame_sequence: pims.FramesSequence,
         for index in corners_ids_to_remove:
             del corners[index]
 
-        if max_corner_count - len(corners) > 0:
+        if max_corner_count - len(corners) > 50:
             mask = np.ones_like(cur_frame, dtype=np.uint8) * 255
-            for corner_coords, stat in zip(tracked_corners_coords, status):
-                if stat:
-                    cv2.circle(mask, np.int0(corner_coords), radius, 0, -1)
+            for corner_coords in corners.values():
+                cv2.circle(mask, np.int0(corner_coords), radius, 0, -1)
 
-            corners_coords = cv2.goodFeaturesToTrack(
+            temp_corners_coords = cv2.goodFeaturesToTrack(
                 image=cur_frame,
                 maxCorners=max_corner_count - len(corners),
                 mask=mask,
                 **shi_tomasi_params)
 
-            corners_coords = np.float32(corners_coords.reshape(-1, 2))
+            if temp_corners_coords is not None:
+                temp_corners_coords = np.float32(temp_corners_coords.reshape(-1, 2))
 
-            for corner_coords in corners_coords:
-                corners[next(index_gen)] = corner_coords
+                for corner_coords in temp_corners_coords:
+                    corners[next(index_gen)] = corner_coords
 
         corners_coords = np.array([point for point in corners.values()])
 
