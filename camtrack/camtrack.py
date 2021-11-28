@@ -32,17 +32,77 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                           known_view_1: Optional[Tuple[int, Pose]] = None,
                           known_view_2: Optional[Tuple[int, Pose]] = None) \
         -> Tuple[List[Pose], PointCloud]:
-    if known_view_1 is None or known_view_2 is None:
-        raise NotImplementedError()
-
     rgb_sequence = frameseq.read_rgb_f32(frame_sequence_path)
     intrinsic_mat = to_opencv_camera_mat3x3(
         camera_parameters,
         rgb_sequence[0].shape[0]
     )
 
+    ratio = []
+
+    if known_view_1 is None or known_view_2 is None:
+        for i in range(0, len(corner_storage), (10 if len(corner_storage) > 50 else 1)):
+            frame1 = i
+            for j in range(
+                    i + (10 if len(corner_storage) > 50 else 1),
+                    len(corner_storage),
+                    (10 if len(corner_storage) > 50 else 1)
+            ):
+                frame2 = j
+
+                corrs = build_correspondences(
+                    corner_storage[frame1],
+                    corner_storage[frame2]
+                )
+
+                E, mask_essential = cv2.findEssentialMat(
+                    corrs.points_1,
+                    corrs.points_2,
+                    intrinsic_mat,
+                    method=cv2.RANSAC,
+                    prob=0.9999,
+                    threshold=1,
+                    maxIters=5000,
+                )
+
+                H, mask_homography = cv2.findHomography(
+                    corrs.points_1,
+                    corrs.points_2,
+                    method=cv2.RANSAC,
+                    ransacReprojThreshold=2,
+                )
+
+                ratio.append((i, j, np.count_nonzero(mask_essential, ) / np.count_nonzero(mask_homography, )))
+
+        frame1, frame2, _ = sorted(ratio, key=lambda x: x[2])[-1]
+
+        corrs = build_correspondences(
+            corner_storage[frame1],
+            corner_storage[frame2],
+        )
+
+        E, _ = cv2.findEssentialMat(
+            corrs.points_1,
+            corrs.points_2,
+            intrinsic_mat,
+            method=cv2.RANSAC,
+            prob=0.9999,
+            threshold=1,
+            maxIters=5000,
+        )
+
+        _, R, t, _ = cv2.recoverPose(
+            E,
+            corrs.points_1,
+            corrs.points_2,
+            intrinsic_mat,
+        )
+
+        known_view_1 = (frame1, Pose(r_mat=np.eye(3, ), t_vec=np.zeros(3, )))
+        known_view_2 = (frame2, Pose(R.T, R.T @ -t))
+
     np.random.seed(42)
-    params = TriangulationParameters(5, 1, 0.2)
+    params = TriangulationParameters(1, 1, 0.1)
     dist_coefs = np.array([])
 
     frame_1 = known_view_1[0]
@@ -135,9 +195,9 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
             succeeded, rvec, tvec, inliers = cv2.solvePnPRansac(np.array(selected_points_3d),
                                                                 np.array(selected_points_2d),
                                                                 intrinsic_mat, dist_coefs,
-                                                                iterationsCount=100,
+                                                                iterationsCount=5000,
                                                                 reprojectionError=params.max_reprojection_error,
-                                                                confidence=0.99)
+                                                                confidence=0.9999)
 
             if succeeded:
                 print(f"{selected_frame} frame processing succeeded")
