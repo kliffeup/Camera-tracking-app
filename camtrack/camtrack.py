@@ -69,7 +69,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
                     corrs.points_1,
                     corrs.points_2,
                     method=cv2.RANSAC,
-                    ransacReprojThreshold=2,
+                    ransacReprojThreshold=1,
                 )
 
                 ratio.append((i, j, np.count_nonzero(mask_essential, ) / np.count_nonzero(mask_homography, )))
@@ -102,7 +102,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         known_view_2 = (frame2, Pose(R.T, R.T @ -t))
 
     np.random.seed(42)
-    params = TriangulationParameters(1, 1, 0.1)
+    params = TriangulationParameters(0.7, 0.7, 0.)
     dist_coefs = np.array([])
 
     frame_1 = known_view_1[0]
@@ -211,9 +211,23 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
 
             print("")
 
-    for i in range(len(view_mats)):
+    count = 1
+    last_t = view_mats[0][:, 3]
+    next_t = view_mats[0][:, 3]
+    for i in range(1, len(view_mats) - 1):
         if view_mats[i] is None:
+            for j in range(i + 1, len(view_mats)):
+                if view_mats[j] is not None:
+                    next_t = view_mats[j][:, 3]
+                    count = j - i
+                    break
             view_mats[i] = view_mats[i - 1]
+            view_mats[i][:, 3] = 1 / (count + 1) * last_t + count / (count + 1) * next_t
+        else:
+            last_t = view_mats[i][:, 3]
+            next_t = view_mats[i][:, 3]
+            count = 1
+
 
     calc_point_cloud_colors(
         point_cloud_builder,
