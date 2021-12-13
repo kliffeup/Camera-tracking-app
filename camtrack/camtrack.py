@@ -102,7 +102,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
         known_view_2 = (frame2, Pose(R.T, R.T @ -t))
 
     np.random.seed(42)
-    params = TriangulationParameters(0.7, 0.7, 0.)
+    params = TriangulationParameters(1.0, 0.5, 0.6)
     dist_coefs = np.array([])
 
     frame_1 = known_view_1[0]
